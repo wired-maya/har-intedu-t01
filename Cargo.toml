@@ -1,0 +1,12 @@
+[package]
+name = "game" # Simple name because package isn't being published anywhere
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]  # Compile this crate to a dynamic C library.
+
+[dependencies]
+godot = { git = "https://github.com/godot-rust/gdext", branch = "master" }
+# godot_macros = { git = "https://github.com/wired-maya/godot_macros.git" } doesn't update fast enough?
+godot_macros = { path = "../../Rust/godot_macros" }

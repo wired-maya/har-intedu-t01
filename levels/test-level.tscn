@@ -1,0 +1,43 @@
+[gd_scene load_steps=5 format=3 uid="uid://b7unr7eunil2i"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_jqgee"]
+size = Vector3(20, 1, 20)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mv1k1"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_eln8j"]
+size = Vector3(30, 1, 30)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_xxsme"]
+albedo_color = Color(0.458405, 0.458405, 0.458405, 1)
+
+[node name="Root" type="GameRoot"]
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="."]
+transform = Transform3D(-0.282174, -0.632638, -0.721212, 0.00123381, -0.752, 0.659162, -0.959362, 0.185109, 0.212976, 0, 0, 0)
+
+[node name="Environment" type="Node3D" parent="."]
+
+[node name="Field" type="StaticBody3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Environment/Field"]
+mesh = SubResource("BoxMesh_jqgee")
+skeleton = NodePath("../../Ground/MeshInstance3D")
+surface_material_override/0 = SubResource("StandardMaterial3D_mv1k1")
+
+[node name="Ground" type="StaticBody3D" parent="Environment"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.1, 0)
+
+[node name="MeshInstance3D" type="MeshInstance3D" parent="Environment/Ground"]
+mesh = SubResource("BoxMesh_eln8j")
+skeleton = NodePath("../../..")
+surface_material_override/0 = SubResource("StandardMaterial3D_xxsme")
+
+[node name="CameraPivot" type="PanningCamera" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
+
+[node name="Camera3D" type="Camera3D" parent="CameraPivot"]
+transform = Transform3D(1, 0, 0, 0, 0.5, 0.866025, 0, -0.866025, 0.5, 0, 1, 1.49012e-08)
+current = true
+size = 2.802
