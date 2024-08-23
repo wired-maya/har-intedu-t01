@@ -1,4 +1,4 @@
-use godot::{builtin::{Plane, Vector2, Vector3}, classes::{Camera3D, IMarker3D, INode, InputEvent, InputEventMouseButton, InputEventMouseMotion, Marker3D, Node}, global::MouseButton, init::{gdextension, ExtensionLibrary}, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
+use godot::{builtin::{Plane, Rect2, Vector2, Vector3}, classes::{Camera3D, IMarker3D, INode, InputEvent, InputEventMouseButton, InputEventMouseMotion, Marker3D, Node}, global::MouseButton, init::{gdextension, ExtensionLibrary}, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
 use godot_macros::{n, nm};
 
 mod constants;
@@ -35,12 +35,14 @@ struct PanningCamera {
     base: Base<Marker3D>,
     screen_last_pos: Vector2,
     mouse_last_pos: Vector3,
-    zoom: f32,
     panning: bool,
-    pub cam_plane: Plane,
-    
-    #[export] cam_bounds: Vector2,
-    #[export] bound_pos: Vector3, // Sets position of camera bound's centre
+
+    #[export] plane: Plane,
+    #[export] bounds: Rect2, // 0,0 rect means no bounds
+    #[export] zoom_step: f32,
+    #[export] zoom_max: f32,
+    #[export] zoom_min: f32,
+    #[export] #[var(get, set = set_zoom)] zoom: f32,
 }
 
 #[godot_api]
@@ -50,19 +52,21 @@ impl IMarker3D for PanningCamera {
             base,
             screen_last_pos: Vector2::ZERO,
             mouse_last_pos: Vector3::ZERO,
-            zoom: 0.0,
             panning: false,
-            cam_plane: Plane::from_normal_at_origin(Vector3::UP), // y = 0
 
-            cam_bounds: Vector2::ZERO,
-            bound_pos: Vector3::ZERO,
+            // These should be set in editor
+            plane: Plane::from_normal_at_origin(Vector3::UP), // y = 0
+            bounds: Rect2::from_corners(Vector2::new(0.0, 0.0), Vector2::new(0.0, 0.0)),
+            zoom_max: CAM_ZOOM_MAX,
+            zoom_min: CAM_ZOOM_MIN,
+            zoom_step: CAM_ZOOM_STEP,
+            zoom: 1.0,
         }
     }
 
     // Run when engine has finished loading, so we bind engine objects here
     fn ready(&mut self) {
-        let zoom: f32 = n!(self, "Camera3D", Camera3D).get_position().y; // TODO: Ensure camera 3D by adding it in ready
-        self.zoom = zoom;
+        n!(self, "Camera3D", Camera3D).set_position(Vector3::new(0.0, self.zoom, 0.0)); // TODO: Ensure camera 3D by adding it in ready
     }
 
     fn unhandled_input(&mut self, event: Gd<InputEvent>) {
@@ -91,9 +95,20 @@ impl IMarker3D for PanningCamera {
             let screen_last_pos = self.screen_last_pos;
             self.mouse_last_pos = self.get_world_mouse_pos(screen_last_pos);
 
+            let last_pos = self.base().get_position();
             let mut offset: Vector3 = self.mouse_last_pos - mouse_current_pos; // Drag by moving opposite dir of mouse movement
             offset.y = 0.0; // Only zoom can move camera on y axis
-            self.base_mut().translate(offset);
+            let mut current_pos: Vector3 = last_pos + offset;
+
+            // Clamp movement to bounds if they are bigger than 0
+            if self.bounds.size != Vector2::new(0.0, 0.0) {
+                if current_pos.x < self.bounds.position.x { current_pos.x = self.bounds.position.x; }
+                if current_pos.x > self.bounds.end().x { current_pos.x = self.bounds.end().x; }
+                if current_pos.z < self.bounds.position.y { current_pos.z = self.bounds.position.y; }
+                if current_pos.z > self.bounds.end().y { current_pos.z = self.bounds.end().y; }
+            }
+
+            self.base_mut().set_position(current_pos);
 
             // Update
             self.mouse_last_pos = mouse_current_pos;
@@ -110,8 +125,7 @@ impl PanningCamera {
         let origin: Vector3 = cam.project_ray_origin(pos);
         let normal: Vector3 = cam.project_ray_normal(pos);
 
-        // TODO: change back to not using cam plane
-        if let Some(world_pos) = self.cam_plane.intersect_ray(origin, normal) {
+        if let Some(world_pos) = self.plane.intersect_ray(origin, normal) {
             world_pos
         } else {
             Vector3::ZERO
@@ -119,17 +133,12 @@ impl PanningCamera {
     }
 
     #[func]
-    pub fn get_zoom(&self) -> f32 {
-        self.zoom
-    }
-
-    #[func]
-    pub fn set_zoom(&mut self, zoom: f32) {
+    fn set_zoom(&mut self, zoom: f32) {
         self.zoom = zoom;
 
         // Clamp
-        if self.zoom < CAM_ZOOM_MIN { self.zoom = CAM_ZOOM_MIN; }
-        if self.zoom > CAM_ZOOM_MAX { self.zoom = CAM_ZOOM_MAX; }
+        if self.zoom < self.get_zoom_min() { self.zoom = self.get_zoom_min(); }
+        if self.zoom > self.get_zoom_max() { self.zoom = self.get_zoom_max(); }
 
         nm!(self, "Camera3D", Camera3D).set_position(Vector3::new(0.0, zoom, 0.0));
     }

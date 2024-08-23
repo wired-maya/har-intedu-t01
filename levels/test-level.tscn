@@ -35,6 +35,9 @@ skeleton = NodePath("../../..")
 surface_material_override/0 = SubResource("StandardMaterial3D_xxsme")
 
 [node name="CameraPivot" type="PanningCamera" parent="."]
+bounds = Rect2(-10, -10, 20, 20)
+zoom_max = 10.0
+zoom = 5.0
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)
 
 [node name="Camera3D" type="Camera3D" parent="CameraPivot"]
