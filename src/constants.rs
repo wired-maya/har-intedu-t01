@@ -1,3 +1,4 @@
-pub const CAM_ZOOM_STEP: f32 = 1.0;
-pub const CAM_ZOOM_MIN: f32 = 1.0;
-pub const CAM_ZOOM_MAX: f32 = 20.0;
+pub const CAM_ZOOM_STEP_DEFAULT: f32 = 1.0;
+pub const CAM_ZOOM_MIN_DEFAULT: f32 = 1.0;
+pub const CAM_ZOOM_MAX_DEFAULT: f32 = 20.0;
+pub const DITHER_RES_DIVISOR_DEFAULT: i32 = 5;

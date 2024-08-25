@@ -1,5 +1,4 @@
-use godot::{builtin::{Plane, Rect2, Vector2, Vector3}, classes::{Camera3D, IMarker3D, INode, InputEvent, InputEventMouseButton, InputEventMouseMotion, Marker3D, Node}, global::MouseButton, init::{gdextension, ExtensionLibrary}, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
-use godot_macros::{n, nm};
+use godot::{builtin::{Plane, Rect2, Vector2, Vector2i, Vector3}, classes::{Camera3D, ICamera3D, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Node, SubViewport, Viewport}, global::MouseButton, init::{gdextension, ExtensionLibrary}, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
 
 mod constants;
 use constants::*;
@@ -29,10 +28,11 @@ impl INode for GameRoot {
     }
 }
 
+// TODO: Make this a descendant of the camera
 #[derive(GodotClass)]
-#[class(base=Marker3D)]
+#[class(base=Camera3D)]
 struct PanningCamera {
-    base: Base<Marker3D>,
+    base: Base<Camera3D>,
     screen_last_pos: Vector2,
     mouse_last_pos: Vector3,
     panning: bool,
@@ -46,8 +46,8 @@ struct PanningCamera {
 }
 
 #[godot_api]
-impl IMarker3D for PanningCamera {
-    fn init(base: Base<Marker3D>) -> Self {
+impl ICamera3D for PanningCamera {
+    fn init(base: Base<Camera3D>) -> Self {
         Self {
             base,
             screen_last_pos: Vector2::ZERO,
@@ -55,18 +55,13 @@ impl IMarker3D for PanningCamera {
             panning: false,
 
             // These should be set in editor
-            plane: Plane::from_normal_at_origin(Vector3::UP), // y = 0
+            plane: Plane::from_normal_at_origin(Vector3::UP),
             bounds: Rect2::from_corners(Vector2::new(0.0, 0.0), Vector2::new(0.0, 0.0)),
-            zoom_max: CAM_ZOOM_MAX,
-            zoom_min: CAM_ZOOM_MIN,
-            zoom_step: CAM_ZOOM_STEP,
+            zoom_max: CAM_ZOOM_MAX_DEFAULT,
+            zoom_min: CAM_ZOOM_MIN_DEFAULT,
+            zoom_step: CAM_ZOOM_STEP_DEFAULT,
             zoom: 1.0,
         }
-    }
-
-    // Run when engine has finished loading, so we bind engine objects here
-    fn ready(&mut self) {
-        n!(self, "Camera3D", Camera3D).set_position(Vector3::new(0.0, self.zoom, 0.0)); // TODO: Ensure camera 3D by adding it in ready
     }
 
     fn unhandled_input(&mut self, event: Gd<InputEvent>) {
@@ -82,9 +77,9 @@ impl IMarker3D for PanningCamera {
                     self.panning = false;
                 }
             } else if event.get_button_index() == MouseButton::WHEEL_UP {
-                self.set_zoom(self.zoom - CAM_ZOOM_STEP);
+                self.set_zoom(self.zoom - CAM_ZOOM_STEP_DEFAULT);
             } else if event.get_button_index() == MouseButton::WHEEL_DOWN {
-                self.set_zoom(self.zoom + CAM_ZOOM_STEP);
+                self.set_zoom(self.zoom + CAM_ZOOM_STEP_DEFAULT);
             }
         } else if event.get_class() == "InputEventMouseMotion".into() && self.panning {
             let event: Gd<InputEventMouseMotion> = event.cast(); // Cast won't fail due to above check
@@ -121,9 +116,8 @@ impl IMarker3D for PanningCamera {
 impl PanningCamera {
     // Get the position of the mouse projected to a plane at y = 0
     fn get_world_mouse_pos(&self, pos: Vector2) -> Vector3 {
-        let cam: Gd<Camera3D> = n!(self, "Camera3D", Camera3D);
-        let origin: Vector3 = cam.project_ray_origin(pos);
-        let normal: Vector3 = cam.project_ray_normal(pos);
+        let origin: Vector3 = self.base().project_ray_origin(pos);
+        let normal: Vector3 = self.base().project_ray_normal(pos);
 
         if let Some(world_pos) = self.plane.intersect_ray(origin, normal) {
             world_pos
@@ -140,6 +134,127 @@ impl PanningCamera {
         if self.zoom < self.get_zoom_min() { self.zoom = self.get_zoom_min(); }
         if self.zoom > self.get_zoom_max() { self.zoom = self.get_zoom_max(); }
 
-        nm!(self, "Camera3D", Camera3D).set_position(Vector3::new(0.0, zoom, 0.0));
+        let mut last_pos: Vector3 = self.base().get_position();
+        last_pos.y = zoom;
+
+        self.base_mut().set_position(last_pos);
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=SubViewport)]
+struct ResolutionDividerViewport {
+    base: Base<SubViewport>,
+
+    #[export] #[var(get, set=set_resolution_divisor)] resolution_divisor: i32,
+}
+
+#[godot_api]
+impl ISubViewport for ResolutionDividerViewport {
+    fn init(base: Base<SubViewport>) -> Self {
+        Self {
+            base,
+            resolution_divisor: DITHER_RES_DIVISOR_DEFAULT,
+        }
+    }
+
+    fn ready(&mut self) {
+        // Apply changes to divisor that occured before the node was put in a tree
+        self.set_resolution_divisor(self.resolution_divisor);
+    }
+}
+
+#[godot_api]
+impl ResolutionDividerViewport {
+    // Adjust resolution scales to reflect divisor
+    #[func]
+    fn set_resolution_divisor(&mut self, res_div: i32) {
+        self.resolution_divisor = res_div;
+
+        // Can't obtain screen size without being in a tree
+        if self.base().is_inside_tree() {
+            let size: Vector2i = self.base().get_window()
+                .expect("Node should have a root window if inside a tree").get_content_scale_size();
+            
+            let low_size: Vector2i = size / res_div;
+
+            self.base_mut().set_size(low_size);
+        }
+    }
+}
+
+// Passes input to provided viewport
+#[derive(GodotClass)]
+#[class(base=Node)]
+struct InputPassNode {
+    base: Base<Node>,
+
+    #[export] child_viewport: Option<Gd<Viewport>>,
+    #[export] child_different_size: bool, // Set to true if it is, otherwise mouse inputs will be incorrect
+
+    // If 0, the childviewport is not integer scaled
+    // If negative, it is interpreted as 1 / n (this means that the child is smaller by a factor of n)
+    #[export] integer_scale: i32,
+}
+
+#[godot_api]
+impl INode for InputPassNode {
+    fn init(base: Base<Node>) -> Self {
+        Self {
+            base,
+
+            child_viewport: None,
+            child_different_size: false,
+            integer_scale: 0,
+        }
+    }
+
+    fn input(&mut self, event: Gd<InputEvent>) {
+        self.handle_input(event);
+    }
+
+    fn unhandled_input(&mut self, event: Gd<InputEvent>) {
+        self.handle_input(event);
+    }
+}
+
+#[godot_api]
+impl InputPassNode {
+    #[func]
+    fn handle_input(&mut self, event: Gd<InputEvent>) {
+        if let Some(mut viewport) = self.get_child_viewport() {
+            // Cannot use && with if/let
+            if self.base().is_inside_tree() {
+                // If attached viewport has different resolution, adjust mouse position to
+                // one in new viewport's resolution
+                let is_mouse_input = event.get_class() == "InputEventMouseButton".into() || event.get_class() == "InputEventMouseMotion".into();
+
+                if self.child_different_size && is_mouse_input {
+                    let mut event: Gd<InputEventMouse> = event.clone().cast(); // Can't fail because of above check
+                    let mut x: f32 = event.get_position().x;
+                    let mut y: f32 = event.get_position().y;
+
+                    if self.integer_scale == 0 { // Map normally
+                        let parent_size: Vector2 = self.base().get_viewport()
+                            .expect("InputPassNode requires a parent viewport").get_visible_rect().size;
+                        let child_size: Vector2 = viewport.get_visible_rect().size;
+
+                        // f:R^ab -> R^cd
+                        x = (x / parent_size.x) * child_size.x;
+                        y = (y / parent_size.y) * child_size.y;
+                    } else if self.integer_scale > 0 { // Child is n times bigger than parent
+                        x = x * self.integer_scale as f32;
+                        y = y * self.integer_scale as f32;
+                    } else { // Child is n times smaller than parent
+                        x = x / (-self.integer_scale) as f32;
+                        y = y / (-self.integer_scale) as f32;
+                    }
+
+                    event.set_position(Vector2::new(x, y));
+                }
+
+                viewport.push_input_ex(event).in_local_coords(true).done();
+            }
+        }
     }
 }
