@@ -1,4 +1,4 @@
-use godot::{builtin::{Dictionary, Plane, Rect2, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{Camera3D, GridMap, ICamera3D, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, SubViewport, Viewport}, global::{godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
+use godot::{builtin::{Dictionary, GString, Plane, Rect2, StringName, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{canvas_item, Camera3D, CanvasItem, ColorRect, GridMap, ICamera3D, IColorRect, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Material, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, Shader, ShaderMaterial, SubViewport, Time, Viewport}, global::{godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass, Var}};
 
 mod constants;
 use constants::*;
@@ -37,6 +37,8 @@ struct PanningCamera {
     panning: bool,
     mouse_world_intersection: Dictionary,
     last_space_state: Option<Gd<PhysicsDirectSpaceState3D>>,
+    last_cam_pos: Vector3,
+    cam_pos_diff: Vector3,
 
     #[export] plane: Plane,
     #[export] bounds: Rect2, // 0,0 rect means no bounds
@@ -44,6 +46,7 @@ struct PanningCamera {
     #[export] zoom_max: f32,
     #[export] zoom_min: f32,
     #[export] #[var(get, set = set_zoom)] zoom: f32,
+    #[export] uniform_shader_canvas_item: Option<Gd<CanvasItem>>, // Information is set this shader for processing
 }
 
 #[godot_api]
@@ -56,6 +59,8 @@ impl ICamera3D for PanningCamera {
             panning: false,
             mouse_world_intersection: Dictionary::new(),
             last_space_state: None,
+            last_cam_pos: Vector3::ZERO,
+            cam_pos_diff: Vector3::ZERO,
 
             // These should be set in editor
             plane: Plane::from_normal_at_origin(Vector3::UP),
@@ -64,6 +69,7 @@ impl ICamera3D for PanningCamera {
             zoom_min: CAM_ZOOM_MIN_DEFAULT,
             zoom_step: CAM_ZOOM_STEP_DEFAULT,
             zoom: 1.0,
+            uniform_shader_canvas_item: None,
         }
     }
 
@@ -120,6 +126,20 @@ impl ICamera3D for PanningCamera {
     fn process(&mut self, _: f64) {
         // Since process is ran every frame, this will make the mouse position most up to date
         self.update_world_mouse_intersection();
+
+        let cam_pos: Vector3 = self.base().get_position();
+        self.cam_pos_diff = cam_pos - self.last_cam_pos;
+
+        // Set uniforms to shader each frame
+        if let Some(ref mut canvas_item) = self.get_uniform_shader_canvas_item() {
+            let mut shader = canvas_item.get_material().expect("Canvas item should have shader material attached to set uniforms")
+                .try_cast::<ShaderMaterial>().expect("Canvas item should have shader material attached to set uniforms");
+            
+            shader.set_shader_parameter("panning".into(), Variant::from(self.panning));
+            shader.set_shader_parameter("cam_pos_diff".into(), Variant::from(self.cam_pos_diff));
+        }
+
+        self.last_cam_pos = cam_pos;
     }
 
     fn physics_process(&mut self, _: f64) {
@@ -205,6 +225,11 @@ impl PanningCamera {
     #[func]
     fn get_world_mouse_pos(&self) -> Variant {
         self.mouse_world_intersection.get_or_nil("position")
+    }
+
+    #[func]
+    fn get_cam_pos_diff(&self) -> Vector3 {
+        self.cam_pos_diff
     }
 }
 
@@ -399,5 +424,254 @@ impl FieldGripMap {
     #[func]
     fn clear_overlay_block(&mut self, overlay_coords: Vector3i) {
         self.base_mut().set_cell_item(overlay_coords, -1);
+    }
+}
+
+// ColorRect that passes time to its shader material for more advanced shading
+// ColorRect's shader needs a uniform float, but you can set name
+#[derive(GodotClass)]
+#[class(base=ColorRect)]
+struct TimeShaderRect {
+    base: Base<ColorRect>,
+    shader_mat_ref: Option<Gd<ShaderMaterial>>,
+
+    #[export] uniform_name: StringName,
+}
+
+#[godot_api]
+impl IColorRect for TimeShaderRect {
+    fn init(base: Base<ColorRect>) -> Self {
+        Self {
+            base,
+            shader_mat_ref: None,
+
+            uniform_name: "cur_time".into(),
+        }
+    }
+
+    // Set Shader reference here for performance
+    fn ready(&mut self) {
+        let mat: Option<Gd<Material>> = self.base().get_material();
+        if mat == None { return; }
+        let mat: Gd<Material> = mat.expect("Cannot fail due to above check");
+
+        if mat.get_class() != "ShaderMaterial".into() { return; }
+
+        self.shader_mat_ref = Some(mat.cast());
+    }
+
+    fn process(&mut self, _: f64) {
+        let uniform_name: StringName = self.get_uniform_name();
+
+        if let Some(ref mut shader_mat) = self.shader_mat_ref {
+            let time: f64 = Time::singleton().get_unix_time_from_system();
+
+            shader_mat.set_shader_parameter(uniform_name, Variant::from(time));
+        }
+    }
+}
+
+#[godot_api]
+impl TimeShaderRect {
+    // For performance reasons the ref is stored in the struct
+    // Needs to be called whenever shader is updated
+    #[func]
+    fn set_shader_mat_ref(&mut self, shader_mat: Option<Gd<ShaderMaterial>>) {
+        self.shader_mat_ref = shader_mat;
+    }
+}
+
+// ColorRect that passes frames elapsed since it was created
+// ColorRect's shader needs a uniform int, but you can set name
+#[derive(GodotClass)]
+#[class(base=ColorRect)]
+struct FrameCountShaderRect {
+    base: Base<ColorRect>,
+    shader_mat_ref: Option<Gd<ShaderMaterial>>,
+    frame: i64,
+
+    #[export] uniform_name: StringName,
+}
+
+#[godot_api]
+impl IColorRect for FrameCountShaderRect {
+    fn init(base: Base<ColorRect>) -> Self {
+        Self {
+            base,
+            shader_mat_ref: None,
+            frame: 0,
+
+            uniform_name: "frame".into(),
+        }
+    }
+
+    // Set Shader reference here for performance
+    fn ready(&mut self) {
+        let mat: Option<Gd<Material>> = self.base().get_material();
+        if mat == None { return; }
+        let mat: Gd<Material> = mat.expect("Cannot fail due to above check");
+
+        if mat.get_class() != "ShaderMaterial".into() { return; }
+
+        self.shader_mat_ref = Some(mat.cast());
+    }
+
+    fn process(&mut self, _: f64) {
+        let uniform_name: StringName = self.get_uniform_name();
+        let frame: i64 = self.frame;
+
+        if let Some(ref mut shader_mat) = self.shader_mat_ref {
+            shader_mat.set_shader_parameter(uniform_name, Variant::from(frame));
+        }
+
+        self.frame += 1;
+    }
+}
+
+#[godot_api]
+impl FrameCountShaderRect {
+    // For performance reasons the ref is stored in the struct
+    // Needs to be called whenever shader is updated
+    #[func]
+    fn set_shader_mat_ref(&mut self, shader_mat: Option<Gd<ShaderMaterial>>) {
+        self.shader_mat_ref = shader_mat;
+    }
+}
+
+// ColorRect that passes physics frames elapsed since it was created
+// ColorRect's shader needs a uniform int, but you can set name
+#[derive(GodotClass)]
+#[class(base=ColorRect)]
+struct PhysCountShaderRect {
+    base: Base<ColorRect>,
+    shader_mat_ref: Option<Gd<ShaderMaterial>>,
+    phys_frame: i64,
+
+    #[export] uniform_name: StringName,
+}
+
+#[godot_api]
+impl IColorRect for PhysCountShaderRect {
+    fn init(base: Base<ColorRect>) -> Self {
+        Self {
+            base,
+            shader_mat_ref: None,
+            phys_frame: 0,
+
+            uniform_name: "phys_frame".into(),
+        }
+    }
+
+    // Set Shader reference here for performance
+    fn ready(&mut self) {
+        let mat: Option<Gd<Material>> = self.base().get_material();
+        if mat == None { return; }
+        let mat: Gd<Material> = mat.expect("Cannot fail due to above check");
+
+        if mat.get_class() != "ShaderMaterial".into() { return; }
+
+        self.shader_mat_ref = Some(mat.cast());
+    }
+
+    fn physics_process(&mut self, _: f64) {
+        let uniform_name: StringName = self.get_uniform_name();
+        let frame: i64 = self.phys_frame;
+
+        if let Some(ref mut shader_mat) = self.shader_mat_ref {
+            shader_mat.set_shader_parameter(uniform_name, Variant::from(frame));
+        }
+
+        self.phys_frame += 1;
+    }
+}
+
+#[godot_api]
+impl PhysCountShaderRect {
+    // For performance reasons the ref is stored in the struct
+    // Needs to be called whenever shader is updated
+    #[func]
+    fn set_shader_mat_ref(&mut self, shader_mat: Option<Gd<ShaderMaterial>>) {
+        self.shader_mat_ref = shader_mat;
+    }
+}
+
+// ColorRect specifically for this game's dithering
+#[derive(GodotClass)]
+#[class(base=ColorRect)]
+struct DitherShaderRect {
+    base: Base<ColorRect>,
+    shader_mat_ref: Option<Gd<ShaderMaterial>>,
+    phys_frame: i64,
+    pattern_index: i64,
+    
+    #[export] cam: Option<Gd<PanningCamera>>,
+    #[export] pattern_length: i64,
+    #[export] divisor_coefficient: i64,
+}
+
+#[godot_api]
+impl IColorRect for DitherShaderRect {
+    fn init(base: Base<ColorRect>) -> Self {
+        Self {
+            base,
+            shader_mat_ref: None,
+            phys_frame: 0,
+            pattern_index: 0,
+
+            cam: None,
+            pattern_length: 0,
+            divisor_coefficient: 15,
+        }
+    }
+
+    // Set Shader reference here for performance
+    fn ready(&mut self) {
+        let mat: Option<Gd<Material>> = self.base().get_material();
+        if mat == None { return; }
+        let mat: Gd<Material> = mat.expect("Cannot fail due to above check");
+
+        if mat.get_class() != "ShaderMaterial".into() { return; }
+
+        self.shader_mat_ref = Some(mat.cast());
+    }
+
+    fn process(&mut self, _: f64) {
+        if let Some(ref mut cam) = self.cam {
+            let cam_pos_len: i64 = cam.bind().get_cam_pos_diff().length().ceil() as i64;
+
+            // Don't change index if not moving
+            if cam_pos_len != 0 {
+                // Get index of which pattern to use this frame
+                // Multiply by difference of camera position to add change in dithering
+                // Based on how fast the camera is moving
+                let div: i64 = self.divisor_coefficient / cam_pos_len;
+                self.pattern_index = self.phys_frame / div;
+                self.pattern_index %= self.pattern_length;
+            }
+
+            if let Some(ref mut shader_mat) = self.shader_mat_ref {
+                shader_mat.set_shader_parameter("pattern_index".into(), Variant::from(self.pattern_index));
+            }
+        }
+    }
+
+    fn physics_process(&mut self, _: f64) {
+        let frame: i64 = self.phys_frame;
+
+        if let Some(ref mut shader_mat) = self.shader_mat_ref {
+            shader_mat.set_shader_parameter("phys_frame".into(), Variant::from(frame));
+        }
+
+        self.phys_frame += 1;
+    }
+}
+
+#[godot_api]
+impl DitherShaderRect {
+    // For performance reasons the ref is stored in the struct
+    // Needs to be called whenever shader is updated
+    #[func]
+    fn set_shader_mat_ref(&mut self, shader_mat: Option<Gd<ShaderMaterial>>) {
+        self.shader_mat_ref = shader_mat;
     }
 }
