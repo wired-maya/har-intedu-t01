@@ -1,4 +1,4 @@
-use godot::{builtin::{Plane, Rect2, Vector2, Vector2i, Vector3}, classes::{Camera3D, ICamera3D, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Node, SubViewport, Viewport}, global::MouseButton, init::{gdextension, ExtensionLibrary}, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
+use godot::{builtin::{Dictionary, Plane, Rect2, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{Camera3D, GridMap, ICamera3D, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, SubViewport, Viewport}, global::{godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
 
 mod constants;
 use constants::*;
@@ -28,7 +28,6 @@ impl INode for GameRoot {
     }
 }
 
-// TODO: Make this a descendant of the camera
 #[derive(GodotClass)]
 #[class(base=Camera3D)]
 struct PanningCamera {
@@ -36,6 +35,8 @@ struct PanningCamera {
     screen_last_pos: Vector2,
     mouse_last_pos: Vector3,
     panning: bool,
+    mouse_world_intersection: Dictionary,
+    last_space_state: Option<Gd<PhysicsDirectSpaceState3D>>,
 
     #[export] plane: Plane,
     #[export] bounds: Rect2, // 0,0 rect means no bounds
@@ -53,6 +54,8 @@ impl ICamera3D for PanningCamera {
             screen_last_pos: Vector2::ZERO,
             mouse_last_pos: Vector3::ZERO,
             panning: false,
+            mouse_world_intersection: Dictionary::new(),
+            last_space_state: None,
 
             // These should be set in editor
             plane: Plane::from_normal_at_origin(Vector3::UP),
@@ -70,8 +73,7 @@ impl ICamera3D for PanningCamera {
 
             if event.get_button_index() == MouseButton::LEFT {
                 if event.is_pressed() {
-                    self.mouse_last_pos = self.get_world_mouse_pos(event.get_position());
-                    self.screen_last_pos = event.get_position();
+                    self.mouse_last_pos = self.get_plane_mouse_pos(event.get_position());
                     self.panning = true;
                 } else {
                     self.panning = false;
@@ -81,43 +83,66 @@ impl ICamera3D for PanningCamera {
             } else if event.get_button_index() == MouseButton::WHEEL_DOWN {
                 self.set_zoom(self.zoom + CAM_ZOOM_STEP_DEFAULT);
             }
-        } else if event.get_class() == "InputEventMouseMotion".into() && self.panning {
+        } else if event.get_class() == "InputEventMouseMotion".into() {
             let event: Gd<InputEventMouseMotion> = event.cast(); // Cast won't fail due to above check
 
-            let mouse_current_pos: Vector3 = self.get_world_mouse_pos(event.get_position());
+            if self.panning {
+                let mouse_current_pos: Vector3 = self.get_plane_mouse_pos(event.get_position());
 
-            // Remove jitter loop by recalculating mouse_last_pos (https://discussions.unity.com/t/click-drag-map-view-so-that-point-under-mouse-remains-under-mouse/763291/5)
-            let screen_last_pos = self.screen_last_pos;
-            self.mouse_last_pos = self.get_world_mouse_pos(screen_last_pos);
+                // Remove jitter loop by recalculating mouse_last_pos (https://discussions.unity.com/t/click-drag-map-view-so-that-point-under-mouse-remains-under-mouse/763291/5)
+                let screen_last_pos = self.screen_last_pos;
+                self.mouse_last_pos = self.get_plane_mouse_pos(screen_last_pos);
 
-            let last_pos = self.base().get_position();
-            let mut offset: Vector3 = self.mouse_last_pos - mouse_current_pos; // Drag by moving opposite dir of mouse movement
-            offset.y = 0.0; // Only zoom can move camera on y axis
-            let mut current_pos: Vector3 = last_pos + offset;
+                let last_pos = self.base().get_position();
+                let mut offset: Vector3 = self.mouse_last_pos - mouse_current_pos; // Drag by moving opposite dir of mouse movement
+                offset.y = 0.0; // Only zoom can move camera on y axis
+                let mut current_pos: Vector3 = last_pos + offset;
 
-            // Clamp movement to bounds if they are bigger than 0
-            if self.bounds.size != Vector2::new(0.0, 0.0) {
-                if current_pos.x < self.bounds.position.x { current_pos.x = self.bounds.position.x; }
-                if current_pos.x > self.bounds.end().x { current_pos.x = self.bounds.end().x; }
-                if current_pos.z < self.bounds.position.y { current_pos.z = self.bounds.position.y; }
-                if current_pos.z > self.bounds.end().y { current_pos.z = self.bounds.end().y; }
+                // Clamp movement to bounds if they are bigger than 0
+                if self.bounds.size != Vector2::new(0.0, 0.0) {
+                    if current_pos.x < self.bounds.position.x { current_pos.x = self.bounds.position.x; }
+                    if current_pos.x > self.bounds.end().x { current_pos.x = self.bounds.end().x; }
+                    if current_pos.z < self.bounds.position.y { current_pos.z = self.bounds.position.y; }
+                    if current_pos.z > self.bounds.end().y { current_pos.z = self.bounds.end().y; }
+                }
+
+                self.base_mut().set_position(current_pos);
+
+                // Update
+                self.mouse_last_pos = mouse_current_pos;
             }
-
-            self.base_mut().set_position(current_pos);
-
-            // Update
-            self.mouse_last_pos = mouse_current_pos;
+            
+            // Keep last screen pos current for outside use
             self.screen_last_pos = event.get_position();
         }
+    }
+
+    fn process(&mut self, _: f64) {
+        // Since process is ran every frame, this will make the mouse position most up to date
+        self.update_world_mouse_intersection();
+    }
+
+    fn physics_process(&mut self, _: f64) {
+        // PhysicsDirectSpaceState3D can only safely be accessed from the physics process,
+        // so update space state here
+        if let Some(world_3d) = self.base().get_world_3d() {
+            self.last_space_state = PhysicsServer3D::singleton().space_get_direct_state(world_3d.get_space());
+        }
+    }
+
+    // Apply zoom level immediately
+    fn ready(&mut self) {
+        self.set_zoom(self.zoom);
     }
 }
 
 #[godot_api]
 impl PanningCamera {
     // Get the position of the mouse projected to a plane at y = 0
-    fn get_world_mouse_pos(&self, pos: Vector2) -> Vector3 {
+    #[func]
+    fn get_plane_mouse_pos(&self, pos: Vector2) -> Vector3 {
         let origin: Vector3 = self.base().project_ray_origin(pos);
-        let normal: Vector3 = self.base().project_ray_normal(pos);
+        let normal: Vector3 = self.base().project_ray_normal(pos) * 9999.0;
 
         if let Some(world_pos) = self.plane.intersect_ray(origin, normal) {
             world_pos
@@ -138,6 +163,48 @@ impl PanningCamera {
         last_pos.y = zoom;
 
         self.base_mut().set_position(last_pos);
+    }
+
+    // Function that updates first intersection with the world from mouse position
+    fn update_world_mouse_intersection(&mut self) {
+        let pos: Vector2 = self.screen_last_pos;
+        let origin: Vector3 = self.base().project_ray_origin(pos);
+        let normal: Vector3 = self.base().project_ray_normal(pos) * 9999.0; // Increase length to calc intersections
+
+        let mut dictionary: Dictionary = Dictionary::new();
+        
+        if let Some(ref mut space_state ) = &mut self.last_space_state {
+            let query: Option<Gd<PhysicsRayQueryParameters3D>> = PhysicsRayQueryParameters3D::create(origin, normal);
+
+            dictionary = space_state.intersect_ray(query);
+        }
+
+        self.mouse_world_intersection = dictionary;
+    }
+
+    // Get result dictionary of the first intersection between a ray cast from the mouse
+    // Clones dictionary of intersection, so use other methods unless needed
+    #[func]
+    fn get_world_mouse_intersection(&self) -> Dictionary {
+        self.mouse_world_intersection.clone()
+    }
+
+    // Get the position of the first intersection between a ray cast from the mouse
+    // Rust specific as func trait doesn't allow Option<Vector3>
+    pub fn get_world_mouse_pos_option(&self) -> Option<Vector3> {
+        // Ray did not hit anything
+        if !self.mouse_world_intersection.contains_key("position") { return None; }
+
+        let pos: Variant = self.mouse_world_intersection
+            .get("position").expect("Cannot fail due to above check");
+
+        Some(Vector3::from_variant(&pos))
+    }
+
+    // Function meant for godot that returns a variant, which is compatible with #[func]
+    #[func]
+    fn get_world_mouse_pos(&self) -> Variant {
+        self.mouse_world_intersection.get_or_nil("position")
     }
 }
 
@@ -256,5 +323,81 @@ impl InputPassNode {
                 viewport.push_input_ex(event).in_local_coords(true).done();
             }
         }
+    }
+}
+
+#[derive(GodotClass)]
+#[class(base=GridMap)]
+struct FieldGripMap {
+    base: Base<GridMap>,
+    last_mouse_coords: Option<Vector3i>,
+    last_cell_type: i32,
+
+    #[export] cam: Option<Gd<PanningCamera>>,
+    #[export] highlight_index: i32,
+    #[export] char_start_index: i32,
+}
+
+#[godot_api]
+impl IGridMap for FieldGripMap {
+    fn init(base: Base<GridMap>) -> Self {
+        Self {
+            base,
+            last_mouse_coords: None,
+            last_cell_type: -1,
+
+            cam: None,
+            highlight_index: 0,
+            char_start_index: 0,
+        }
+    }
+
+    fn unhandled_input(&mut self, event: Gd<InputEvent>) {
+        if event.get_class() == "InputEventMouseButton".into() {
+            let _event: Gd<InputEventMouseButton> = event.cast(); // Cast won't fail due to above check
+        }
+    }
+
+    fn process(&mut self, _: f64) {
+        // Mouse pos is calculated every frame for smoothness
+        if let Some(cam) = self.get_cam() {
+            if let Some(world_pos) = cam.bind().get_world_mouse_pos_option() {
+                let mut mouse_coords: Vector3i = self.get_coords_from_world_pos(world_pos);
+
+                // Adjust up one for block above intersecting
+                mouse_coords.y += 1;
+
+                if Some(mouse_coords) != self.last_mouse_coords {
+                    if let Some(last_mouse_coords) = self.last_mouse_coords {
+                        self.set_overlay_block(last_mouse_coords, self.last_cell_type);
+                    }
+
+                    self.last_cell_type = self.base().get_cell_item(mouse_coords);
+
+                    self.set_overlay_block(mouse_coords, self.highlight_index);
+
+                    self.last_mouse_coords = Some(mouse_coords);
+                }
+            }
+        }
+    }
+}
+
+#[godot_api]
+impl FieldGripMap {
+    #[func]
+    fn get_coords_from_world_pos(&self, world_pos: Vector3) -> Vector3i {
+        let local_pos: Vector3 = self.base().to_local(world_pos);
+        self.base().local_to_map(local_pos)
+    }
+
+    #[func]
+    fn set_overlay_block(&mut self, overlay_coords: Vector3i, mesh_index: i32) {
+        self.base_mut().set_cell_item(overlay_coords, mesh_index);
+    }
+
+    #[func]
+    fn clear_overlay_block(&mut self, overlay_coords: Vector3i) {
+        self.base_mut().set_cell_item(overlay_coords, -1);
     }
 }
