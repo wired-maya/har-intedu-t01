@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="HAR-INTEDU-T01"
-run/main_scene="res://levels/test-level.tscn"
+run/main_scene="res://scenes/levels/test-level.tscn"
 config/features=PackedStringArray("4.3", "Forward Plus")
 boot_splash/bg_color=Color(0.113725, 0, 0.129412, 1)
 boot_splash/image="res://imgs/cat eye.png"

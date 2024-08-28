@@ -1,0 +1,82 @@
+[gd_scene load_steps=12 format=3 uid="uid://p5kbswva62v0"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_q8kks"]
+albedo_color = Color(0, 0, 0, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_tuy1f"]
+material = SubResource("StandardMaterial3D_q8kks")
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_m80jr"]
+size = Vector3(0.999, 0.999, 0.999)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6iha4"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_fbmip"]
+material = SubResource("StandardMaterial3D_6iha4")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_egyy3"]
+albedo_color = Color(0, 0, 1, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_lmruu"]
+material = SubResource("StandardMaterial3D_egyy3")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_mumsb"]
+albedo_color = Color(1, 0, 0, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_l0b0j"]
+material = SubResource("StandardMaterial3D_mumsb")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_jkxc4"]
+albedo_color = Color(0, 1, 0, 1)
+
+[sub_resource type="BoxMesh" id="BoxMesh_84py5"]
+material = SubResource("StandardMaterial3D_jkxc4")
+
+[node name="Root" type="Node3D"]
+
+[node name="EmptyBlock" type="MeshInstance3D" parent="."]
+mesh = SubResource("BoxMesh_tuy1f")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="EmptyBlock"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="EmptyBlock/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="HighlightBlock" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0)
+mesh = SubResource("BoxMesh_fbmip")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="HighlightBlock"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HighlightBlock/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="MovementHighlightBlock" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2, 0, 0)
+mesh = SubResource("BoxMesh_lmruu")
+skeleton = NodePath("../HighlightBlock")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="MovementHighlightBlock"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="MovementHighlightBlock/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="AttackHighlightBlock" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3, 0, 0)
+mesh = SubResource("BoxMesh_l0b0j")
+skeleton = NodePath("../HighlightBlock")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="AttackHighlightBlock"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="AttackHighlightBlock/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="HealHighlightBlock" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4, 0, 0)
+mesh = SubResource("BoxMesh_84py5")
+skeleton = NodePath("../HighlightBlock")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="HealHighlightBlock"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HealHighlightBlock/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
