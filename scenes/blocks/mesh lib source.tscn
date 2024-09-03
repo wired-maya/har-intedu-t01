@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3 uid="uid://p5kbswva62v0"]
+[gd_scene load_steps=22 format=3 uid="uid://p5kbswva62v0"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_q8kks"]
 albedo_color = Color(0, 0, 0, 1)
@@ -31,6 +31,40 @@ albedo_color = Color(0, 1, 0, 1)
 
 [sub_resource type="BoxMesh" id="BoxMesh_84py5"]
 material = SubResource("StandardMaterial3D_jkxc4")
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_hvbl7"]
+albedo_color = Color(0, 0, 0, 1)
+
+[sub_resource type="PrismMesh" id="PrismMesh_20c0t"]
+material = SubResource("StandardMaterial3D_hvbl7")
+left_to_right = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ie4i0"]
+
+[sub_resource type="PrismMesh" id="PrismMesh_4yucc"]
+material = SubResource("StandardMaterial3D_ie4i0")
+left_to_right = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_g0dmf"]
+albedo_color = Color(0, 0, 1, 1)
+
+[sub_resource type="PrismMesh" id="PrismMesh_x8qp8"]
+material = SubResource("StandardMaterial3D_g0dmf")
+left_to_right = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_3aiqk"]
+albedo_color = Color(1, 0, 0, 1)
+
+[sub_resource type="PrismMesh" id="PrismMesh_k7ost"]
+material = SubResource("StandardMaterial3D_3aiqk")
+left_to_right = 0.0
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_el00a"]
+albedo_color = Color(0, 1, 0, 1)
+
+[sub_resource type="PrismMesh" id="PrismMesh_b0tdm"]
+material = SubResource("StandardMaterial3D_el00a")
+left_to_right = 0.0
 
 [node name="Root" type="Node3D"]
 
@@ -79,4 +113,53 @@ skeleton = NodePath("../HighlightBlock")
 [node name="StaticBody3D" type="StaticBody3D" parent="HealHighlightBlock"]
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="HealHighlightBlock/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="EmptySlope" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 5, 0, 0)
+mesh = SubResource("PrismMesh_20c0t")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="EmptySlope"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="EmptySlope/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="HighlightSlope" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 6, 0, 0)
+mesh = SubResource("PrismMesh_4yucc")
+skeleton = NodePath("../EmptySlope")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="HighlightSlope"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HighlightSlope/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="MovementHighlightSlope" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 7, 0, 0)
+mesh = SubResource("PrismMesh_x8qp8")
+skeleton = NodePath("../EmptySlope")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="MovementHighlightSlope"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="MovementHighlightSlope/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="AttackHighlightSlope" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 8, 0, 0)
+mesh = SubResource("PrismMesh_k7ost")
+skeleton = NodePath("../EmptySlope")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="AttackHighlightSlope"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="AttackHighlightSlope/StaticBody3D"]
+shape = SubResource("BoxShape3D_m80jr")
+
+[node name="HealHighlightSlope" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 9, 0, 0)
+mesh = SubResource("PrismMesh_b0tdm")
+skeleton = NodePath("../EmptySlope")
+
+[node name="StaticBody3D" type="StaticBody3D" parent="HealHighlightSlope"]
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="HealHighlightSlope/StaticBody3D"]
 shape = SubResource("BoxShape3D_m80jr")
