@@ -431,7 +431,7 @@ struct FieldGripMap {
     last_mouse_coords: Option<Vector3i>,
     last_highlight_cell_offset: i32,
     char_refs: HashMap<Vector3i, Gd<FieldCharacter>>,
-    char_focused: bool,
+    focused_char: Option<Gd<FieldCharacter>>,
     focus_highlighted_cells: Vec<Vector3i>, // TODO: Make this a hashmap or tree?
 
     #[export] cam: Option<Gd<PanningCamera>>,
@@ -451,7 +451,7 @@ impl IGridMap for FieldGripMap {
             last_mouse_coords: None,
             last_highlight_cell_offset: -1,
             char_refs: HashMap::new(),
-            char_focused: false,
+            focused_char: None,
             focus_highlighted_cells: Vec::new(),
 
             cam: None,
@@ -468,8 +468,7 @@ impl IGridMap for FieldGripMap {
         if event.get_class() == "InputEventMouseButton".into() {
             let event: Gd<InputEventMouseButton> = event.cast(); // Cast won't fail due to above check
 
-            if event.get_button_index() == MouseButton::LEFT && event.is_pressed() && !self.char_focused {
-                // Get currently moused over character
+            if event.get_button_index() == MouseButton::LEFT && event.is_pressed() && self.focused_char == None {
                 if let Some(mut pos) = self.last_mouse_coords {
                     let mut move_range: u32 = 0;
                     let mut attack_range: u32 = 0;
@@ -477,23 +476,30 @@ impl IGridMap for FieldGripMap {
 
                     pos.y += 1; // Block above currently moused
 
+                    // Get currently moused over character
                     if let Some(char_ref) = self.char_refs.get(&pos) {
                         // Since movement range doesn't include the current position, add 1
                         move_range = char_ref.bind().get_movement_range() + 1;
                         attack_range = char_ref.bind().get_attack_range();
                         heal_range = char_ref.bind().get_heal_range();
-                        self.char_focused = true;
+                        self.set_char_focused(Some((*char_ref).clone()));
                     }
 
-                    if move_range > 0 {
+                    if move_range > 0 || attack_range > 0 || heal_range > 0 {
                         self.show_char_ranges(pos, move_range, attack_range, heal_range);
                     }
                 }
-            } else if event.get_button_index() == MouseButton::RIGHT && event.is_pressed() && self.char_focused {
-                // TODO: Only exit this when hovered over char
-                // Exit out of being focused on a character
-                self.char_focused = false;
-                self.clear_char_ranges();
+            } else if event.get_button_index() == MouseButton::RIGHT && event.is_pressed() && self.focused_char != None {
+                // Only exit this when hovered over char
+                if let Some(mut pos) = self.last_mouse_coords {
+                    pos.y += 1; // Block above currently moused
+
+                    if pos == self.focused_char.as_ref().expect("Cannot fail due to above check").bind().get_field_position() {
+                        // Exit out of being focused on a character
+                        self.set_char_focused(None);
+                        self.clear_char_ranges();
+                    }
+                }
             }
         }
     }
@@ -505,7 +511,7 @@ impl IGridMap for FieldGripMap {
                 let mouse_coords: Vector3i = self.get_coords_from_world_pos(world_pos);
 
                 if Some(mouse_coords) != self.last_mouse_coords {
-                    if !self.char_focused { self.last_highlight_cell_offset = 0; } // Block offset can only be 0 if char not focused
+                    if self.focused_char == None { self.last_highlight_cell_offset = 0; } // Block offset can only be 0 if char not focused
 
                     if let Some(last_mouse_coords) = self.last_mouse_coords {
                         self.set_overlay_block(last_mouse_coords, self.last_highlight_cell_offset);
@@ -661,9 +667,8 @@ impl FieldGripMap {
     }
 
     // TODO: Make this show/hide char information
-    // TODO: Do that by making char_focused Option<Gd<FieldCharacter>>
-    fn _set_char_focused(&mut self, val: bool) {
-        self.char_focused = val;
+    fn set_char_focused(&mut self, val: Option<Gd<FieldCharacter>>) {
+        self.focused_char = val;
     }
 }
 
