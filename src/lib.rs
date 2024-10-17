@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use godot::{builtin::{math::ApproxEq, Array, Basis, Dictionary, EulerOrder, Plane, Quaternion, Rect2, StringName, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{Camera3D, CanvasItem, CharacterBody3D, ColorRect, Engine, GridMap, ICamera3D, ICharacterBody3D, IColorRect, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Material, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, ShaderMaterial, SubViewport, Time, Viewport}, global::{deg_to_rad, godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, GodotClass}};
+use godot::{builtin::{math::ApproxEq, Array, Basis, Dictionary, EulerOrder, GString, Plane, Quaternion, Rect2, StringName, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{Camera3D, CanvasItem, CharacterBody3D, ColorRect, Engine, GridMap, ICamera3D, ICharacterBody3D, IColorRect, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Material, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, ShaderMaterial, SubViewport, Time, Viewport}, global::{deg_to_rad, godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, Export, GodotClass, GodotConvert, Var}};
 
 mod constants;
 use constants::*;
@@ -486,7 +486,9 @@ impl IGridMap for FieldGripMap {
                     }
 
                     if move_range > 0 || attack_range > 0 || heal_range > 0 {
-                        self.show_char_ranges(pos, move_range, attack_range, heal_range);
+                        if let Some(char) = &self.focused_char {
+                            self.show_char_ranges(char.clone());
+                        }
                     }
                 }
             } else if event.get_button_index() == MouseButton::RIGHT && event.is_pressed() && self.focused_char != None {
@@ -562,58 +564,6 @@ impl FieldGripMap {
         self.char_refs.insert(new_pos, char_ref);
     }
 
-    // TODO: Calculate char ranges at point of movement for each field character and store it there
-    // TODO: Add vertical range for if attacking with ranged weapons or using thrusters to go up
-    // TODO: Add unit height restrictions so mechs are of height 2 for example
-    fn get_range_tree(&self, mut node: VecTree<Vector3i>, remaining_range: u32) -> VecTree<Vector3i> {
-        if remaining_range == 0 { return node; } // No more range to probe
-
-        // TODO: Handle slopes, cliffs, etc
-        // TODO: Make enemies block as well
-        // TODO: iterate over existing chars and remove them from being allowed for movement
-        // TODO: Handle being able to fall down a cliff 1 high w/o taking damge, can >1 high by taking damage
-        // TODO: Handle bounds/dropoff/etc so you can't move off the field
-        // Push the 4 tiles around the current one
-        for i in 0..4 {
-            let mut value: Vector3i = node.value;
-
-            // Adjust offsets to get tiles around current one
-            match i {
-                0 => value.x += 1,
-                1 => value.x -= 1,
-                2 => value.z += 1,
-                3 => value.z -= 1,
-                _ => {} // This case will never occur
-            };
-
-            let mut cell_item: i32 = self.base().get_cell_item(value);
-            
-            // Add ability to move up slopes
-            // TODO: Check orientation
-            if cell_item - (cell_item % self.block_type_len) == self.slope_index {
-                value.y += 1;
-            }
-
-            // Handle moving down
-            // TODO: handle damage on height > 1 drop
-            // TODO: MAKE SURE THIS ISN'T CALCULATED OUT OF FIELD BOUNDS!
-            while self.base().get_cell_item(value + Vector3i::new(0, -1, 0)) == GridMap::INVALID_CELL_ITEM {
-                value.y -= 1;
-            }
-
-            cell_item = self.base().get_cell_item(value); // Get adjusted value
-
-            // Cannot be on non-empty tiles
-            if cell_item == GridMap::INVALID_CELL_ITEM {
-                let child_node: VecTree<Vector3i> = VecTree::new(value, vec![]);
-
-                node.children.push(self.get_range_tree(child_node, remaining_range - 1));
-            }
-        }
-
-        node
-    }
-
     fn show_range_tree(&mut self, node: &VecTree<Vector3i>, highlight_offset: i32) {
         for child_node in node.children.iter() {
             self.show_range_tree(child_node, highlight_offset);
@@ -626,16 +576,16 @@ impl FieldGripMap {
     }
 
     #[func]
-    fn show_char_ranges(&mut self, char_pos: Vector3i, movement_range: u32, attack_range: u32, heal_range: u32) {
+    fn show_char_ranges(&mut self, char: Gd<FieldCharacter>) {
         // TODO: Disable healable and attackable if range is 0
         // TODO: Store these trees in field for movement data
-        let healable: VecTree<Vector3i> = self.get_range_tree(VecTree::new(char_pos, vec![]), movement_range + heal_range);
+        let healable: VecTree<Vector3i> = char.bind().get_range_tree(&self, char.bind().movement_range + char.bind().heal_range);
         self.show_range_tree(&healable, self.highlight_heal_offset);
 
-        let attackable: VecTree<Vector3i> = self.get_range_tree(VecTree::new(char_pos, vec![]), movement_range + attack_range);
+        let attackable: VecTree<Vector3i> = char.bind().get_range_tree(&self, char.bind().movement_range + char.bind().attack_range);
         self.show_range_tree(&attackable, self.highlight_attack_offset);
 
-        let reachable: VecTree<Vector3i> = self.get_range_tree(VecTree::new(char_pos, vec![]), movement_range);
+        let reachable: VecTree<Vector3i> = char.bind().get_range_tree(&self, char.bind().movement_range);
         self.show_range_tree(&reachable, self.highlight_move_offset);
 
         // Keep mouse highlight on field
@@ -672,13 +622,24 @@ impl FieldGripMap {
     }
 }
 
+#[derive(GodotConvert, Var, Export)]
+#[godot(via = GString)]
+enum CharType {
+    Player,
+    Ally,
+    Enemy,
+}
+
 #[derive(GodotClass)]
 #[class(base=CharacterBody3D)]
 struct FieldCharacter {
     base: Base<CharacterBody3D>,
+    pub movement_tree: VecTree<Vector3i>,
+    pub attack_tree: VecTree<Vector3i>,
+    pub heal_tree: VecTree<Vector3i>,
 
     #[export] #[var(get, set=set_field_pos)] field_position: Vector3i,
-    #[export] is_enemy: bool, // TODO: Replace with enum since there can be allies that you can't control
+    #[export] chartype: CharType,
     #[export] movement_range: u32,
     #[export] attack_range: u32,
     #[export] heal_range: u32,
@@ -689,9 +650,12 @@ impl ICharacterBody3D for FieldCharacter {
     fn init(base: Base<CharacterBody3D>) -> Self {
         Self {
             base,
+            movement_tree: VecTree { value: Vector3i::new(0, 0, 0), children: vec![] },
+            attack_tree: VecTree { value: Vector3i::new(0, 0, 0), children: vec![] },
+            heal_tree: VecTree { value: Vector3i::new(0, 0, 0), children: vec![] },
 
             field_position: Vector3i::ZERO,
-            is_enemy: false,
+            chartype: CharType::Enemy,
             movement_range: 1,
             attack_range: 1,
             heal_range: 0,
@@ -721,7 +685,61 @@ impl FieldCharacter {
         self.field_position = pos;
     }
 
+    // TODO: Calculate char ranges at point of movement for each field character and store it there
+    // TODO: Add vertical range for if attacking with ranged weapons or using thrusters to go up
+    // TODO: Add unit height restrictions so mechs are of height 2 for example
+    fn _get_range_tree(&self, field: &FieldGripMap, mut node: VecTree<Vector3i>, remaining_range: u32) -> VecTree<Vector3i> {
+        if remaining_range == 0 { return node; } // No more range to probe
 
+        // TODO: Handle slopes, cliffs, etc
+        // TODO: Make enemies block as well
+        // TODO: iterate over existing chars and remove them from being allowed for movement
+        // TODO: Handle being able to fall down a cliff 1 high w/o taking damge, can >1 high by taking damage
+        // TODO: Handle bounds/dropoff/etc so you can't move off the field
+        // Push the 4 tiles around the current one
+        for i in 0..4 {
+            let mut value: Vector3i = node.value;
+
+            // Adjust offsets to get tiles around current one
+            match i {
+                0 => value.x += 1,
+                1 => value.x -= 1,
+                2 => value.z += 1,
+                3 => value.z -= 1,
+                _ => {} // This case will never occur
+            };
+
+            let mut cell_item: i32 = field.base().get_cell_item(value);
+            
+            // Add ability to move up slopes
+            // TODO: Check orientation
+            if cell_item - (cell_item % field.block_type_len) == field.slope_index {
+                value.y += 1;
+            }
+
+            // Handle moving down
+            // TODO: handle damage on height > 1 drop
+            // TODO: MAKE SURE THIS ISN'T CALCULATED OUT OF FIELD BOUNDS!
+            while field.base().get_cell_item(value + Vector3i::new(0, -1, 0)) == GridMap::INVALID_CELL_ITEM {
+                value.y -= 1;
+            }
+
+            cell_item = field.base().get_cell_item(value); // Get adjusted value
+
+            // Cannot be on non-empty tiles
+            if cell_item == GridMap::INVALID_CELL_ITEM {
+                let child_node: VecTree<Vector3i> = VecTree::new(value, vec![]);
+
+                node.children.push(self._get_range_tree(&field, child_node, remaining_range - 1));
+            }
+        }
+
+        node
+    }
+
+    pub fn get_range_tree(&self, field: &FieldGripMap, range: u32) -> VecTree<Vector3i> {
+        self._get_range_tree(field, VecTree::new(self.field_position, vec![]), range)
+    }
 }
 
 // ColorRect specifically for this game's dithering
