@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use godot::{builtin::{math::ApproxEq, Array, Basis, Dictionary, EulerOrder, GString, Plane, Quaternion, Rect2, StringName, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{Camera3D, CanvasItem, CharacterBody3D, ColorRect, Engine, GridMap, ICamera3D, ICharacterBody3D, IColorRect, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Material, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, ShaderMaterial, SubViewport, Time, Viewport}, global::{deg_to_rad, godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, WithBaseField}, prelude::{godot_api, Export, GodotClass, GodotConvert, Var}};
+use godot::{builtin::{math::ApproxEq, Array, Basis, Dictionary, EulerOrder, GString, Plane, Quaternion, Rect2, StringName, Variant, Vector2, Vector2i, Vector3, Vector3i}, classes::{Camera3D, CanvasItem, CharacterBody3D, ColorRect, Engine, GridMap, ICamera3D, ICharacterBody3D, IColorRect, IGridMap, INode, ISubViewport, InputEvent, InputEventMouse, InputEventMouseButton, InputEventMouseMotion, Material, Node, PhysicsDirectSpaceState3D, PhysicsRayQueryParameters3D, PhysicsServer3D, ShaderMaterial, SubViewport, Time, Viewport}, global::{deg_to_rad, godot_print, MouseButton}, init::{gdextension, ExtensionLibrary}, meta::FromGodot, obj::{Base, Gd, GdMut, GdRef, WithBaseField}, prelude::{godot_api, Export, GodotClass, GodotConvert, Var}};
 
 mod constants;
 use constants::*;
+
+// TODO: split into multiple files
 
 struct Game;
 
@@ -249,7 +251,7 @@ impl PanningCamera {
 
         let mut dictionary: Dictionary = Dictionary::new();
         
-        if let Some(ref mut space_state ) = &mut self.last_space_state {
+        if let Some(space_state ) = &mut self.last_space_state {
             let query: Option<Gd<PhysicsRayQueryParameters3D>> = PhysicsRayQueryParameters3D::create(origin, normal);
 
             dictionary = space_state.intersect_ray(query);
@@ -289,49 +291,6 @@ impl PanningCamera {
     }
 }
 
-// TODO: Change this to integer scale viewport
-#[derive(GodotClass)]
-#[class(base=SubViewport)]
-struct ResolutionDividerViewport {
-    base: Base<SubViewport>,
-
-    #[export] #[var(get, set=set_resolution_divisor)] resolution_divisor: i32,
-}
-
-#[godot_api]
-impl ISubViewport for ResolutionDividerViewport {
-    fn init(base: Base<SubViewport>) -> Self {
-        Self {
-            base,
-            resolution_divisor: DITHER_RES_DIVISOR_DEFAULT,
-        }
-    }
-
-    fn ready(&mut self) {
-        // Apply changes to divisor that occured before the node was put in a tree
-        self.set_resolution_divisor(self.resolution_divisor);
-    }
-}
-
-#[godot_api]
-impl ResolutionDividerViewport {
-    // Adjust resolution scales to reflect divisor
-    #[func]
-    fn set_resolution_divisor(&mut self, res_div: i32) {
-        self.resolution_divisor = res_div;
-
-        // Can't obtain screen size without being in a tree
-        if self.base().is_inside_tree() {
-            let size: Vector2i = self.base().get_window()
-                .expect("Node should have a root window if inside a tree").get_content_scale_size();
-            
-            let low_size: Vector2i = size / res_div;
-
-            self.base_mut().set_size(low_size);
-        }
-    }
-}
-
 // Passes input to provided viewport
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -339,11 +298,6 @@ struct InputPassNode {
     base: Base<Node>,
 
     #[export] child_viewport: Option<Gd<Viewport>>,
-    #[export] child_different_size: bool, // Set to true if it is, otherwise mouse inputs will be incorrect
-
-    // If 0, the childviewport is not integer scaled
-    // If negative, it is interpreted as 1 / n (this means that the child is smaller by a factor of n)
-    #[export] integer_scale: i32,
 }
 
 #[godot_api]
@@ -353,8 +307,6 @@ impl INode for InputPassNode {
             base,
 
             child_viewport: None,
-            child_different_size: false,
-            integer_scale: 0,
         }
     }
 
@@ -377,32 +329,6 @@ impl InputPassNode {
             if self.base().is_inside_tree() {
                 // If attached viewport has different resolution, adjust mouse position to
                 // one in new viewport's resolution
-                let is_mouse_input = event.get_class() == "InputEventMouseButton".into() || event.get_class() == "InputEventMouseMotion".into();
-
-                if self.child_different_size && is_mouse_input {
-                    let mut event: Gd<InputEventMouse> = event.clone().cast(); // Can't fail because of above check
-                    let mut x: f32 = event.get_position().x;
-                    let mut y: f32 = event.get_position().y;
-
-                    if self.integer_scale == 0 { // Map normally
-                        let parent_size: Vector2 = self.base().get_viewport()
-                            .expect("InputPassNode requires a parent viewport").get_visible_rect().size;
-                        let child_size: Vector2 = viewport.get_visible_rect().size;
-
-                        // f:R^ab -> R^cd
-                        x = (x / parent_size.x) * child_size.x;
-                        y = (y / parent_size.y) * child_size.y;
-                    } else if self.integer_scale > 0 { // Child is n times bigger than parent
-                        x = x * self.integer_scale as f32;
-                        y = y * self.integer_scale as f32;
-                    } else { // Child is n times smaller than parent
-                        x = x / (-self.integer_scale) as f32;
-                        y = y / (-self.integer_scale) as f32;
-                    }
-
-                    event.set_position(Vector2::new(x, y));
-                }
-
                 viewport.push_input_ex(event).in_local_coords(true).done();
             }
         }
@@ -424,6 +350,7 @@ impl<T> VecTree<T> {
     }
 }
 
+// TODO: make your own
 #[derive(GodotClass)]
 #[class(base=GridMap)]
 struct FieldGripMap {
@@ -464,6 +391,21 @@ impl IGridMap for FieldGripMap {
         }
     }
 
+    fn ready(&mut self) {
+        // Set positions of all child characters
+        let children: Array<Gd<Node>> = self.base().get_children();
+        for char in children.iter_shared() {
+            if char.get_class() == "FieldCharacter".into() {
+                let mut char: Gd<FieldCharacter> = char.cast::<FieldCharacter>();
+                let field_pos: Vector3i = char.bind().get_field_position();
+
+                char.set_position(self.get_world_pos_from_coords(field_pos));
+
+                self.char_refs.insert(field_pos, char);
+            }
+        }
+    }
+
     fn unhandled_input(&mut self, event: Gd<InputEvent>) {
         if event.get_class() == "InputEventMouseButton".into() {
             let event: Gd<InputEventMouseButton> = event.cast(); // Cast won't fail due to above check
@@ -482,7 +424,7 @@ impl IGridMap for FieldGripMap {
                         move_range = char_ref.bind().get_movement_range() + 1;
                         attack_range = char_ref.bind().get_attack_range();
                         heal_range = char_ref.bind().get_heal_range();
-                        self.set_char_focused(Some((*char_ref).clone()));
+                        self.set_char_focused(Some(char_ref.clone()));
                     }
 
                     if move_range > 0 || attack_range > 0 || heal_range > 0 {
@@ -501,6 +443,12 @@ impl IGridMap for FieldGripMap {
                         self.set_char_focused(None);
                         self.clear_char_ranges();
                     }
+                }
+            } else if event.get_button_index() == MouseButton::LEFT && event.is_pressed() && self.focused_char != None {
+                // Move char where appropriate
+                if let Some(pos) = self.last_mouse_coords {
+                    let mut focused_char: GdMut<'_, FieldCharacter> = self.focused_char.as_mut().expect("Always Some").bind_mut();
+                    // TODO: focused_char.set_field_pos_dir(self, pos);
                 }
             }
         }
@@ -539,6 +487,12 @@ impl FieldGripMap {
     }
 
     #[func]
+    fn get_world_pos_from_coords(&self, coords: Vector3i) -> Vector3 {
+        let local_pos: Vector3 = self.base().map_to_local(coords);
+        self.base().to_global(local_pos)
+    }
+
+    #[func]
     fn set_overlay_block(&mut self, overlay_coords: Vector3i, highlight_offset: i32) {
         let mut cell_type: i32 = self.base().get_cell_item(overlay_coords);
         cell_type -= cell_type % self.block_type_len;
@@ -558,10 +512,21 @@ impl FieldGripMap {
     // Change position of character currently on board
     // Does not check whether char_ref at cur_pos is the same
     // Overwrites whatever is at the position
+    // Current position needed to avoid binding issues
     #[func]
-    fn reposition_char(&mut self, char_ref: Gd<FieldCharacter>, cur_pos: Vector3i, new_pos: Vector3i) {
-        self.char_refs.remove_entry(&cur_pos);
-        self.char_refs.insert(new_pos, char_ref);
+    fn reposition_char_from_pos(&mut self, cur_pos: Vector3i, new_pos: Vector3i) {
+        let char_ref = self.char_refs.get(&cur_pos);
+
+        if let Some(char_ref) = char_ref {
+            let mut char_ref: Gd<FieldCharacter> = char_ref.clone();
+
+            char_ref.set_position(self.get_world_pos_from_coords(new_pos));
+
+            self.char_refs.remove_entry(&cur_pos);
+            self.char_refs.insert(new_pos, char_ref);
+
+            // TODO: rebuild trees?
+        }
     }
 
     fn show_range_tree(&mut self, node: &VecTree<Vector3i>, highlight_offset: i32) {
@@ -661,28 +626,18 @@ impl ICharacterBody3D for FieldCharacter {
             heal_range: 0,
         }
     }
-
-    fn ready(&mut self) {
-        self.set_field_pos(self.field_position);
-    }
 }
 
 #[godot_api]
 impl FieldCharacter {
+    // Function to have pos changes when remote debugging or in editor
     #[func]
     fn set_field_pos(&mut self, pos: Vector3i) {
         if Engine::singleton().is_editor_hint() || self.base().is_inside_tree() {
-            // Update position based on FieldGridMap's coordinates
-            let mut field: Gd<FieldGripMap> = self.base().get_parent().expect("FieldCharacter should be direct child of a FieldMap")
-                .try_cast().expect("FieldCharacter should be direct child of a FieldMap");
-
-            self.base_mut().set_position(field.bind().map_to_local(pos));
-
-            // Update position on field
-            field.bind_mut().reposition_char(Gd::from_instance_id(self.base().instance_id()), self.field_position, pos);
+            self.base().get_parent().expect("FieldCharacter should be child of FieldGridMap")
+                .try_cast::<FieldGripMap>().expect("FieldCharacter should be child of FieldGridMap")
+                .bind_mut().reposition_char_from_pos(self.get_field_position(), pos);
         }
-
-        self.field_position = pos;
     }
 
     // TODO: Calculate char ranges at point of movement for each field character and store it there
@@ -713,7 +668,9 @@ impl FieldCharacter {
             
             // Add ability to move up slopes
             // TODO: Check orientation
-            if cell_item - (cell_item % field.block_type_len) == field.slope_index {
+            let block_type_len: i32 = field.block_type_len;
+            let slope_index: i32 = field.slope_index;
+            if cell_item - (cell_item % block_type_len) == slope_index {
                 value.y += 1;
             }
 
@@ -730,7 +687,7 @@ impl FieldCharacter {
             if cell_item == GridMap::INVALID_CELL_ITEM {
                 let child_node: VecTree<Vector3i> = VecTree::new(value, vec![]);
 
-                node.children.push(self._get_range_tree(&field, child_node, remaining_range - 1));
+                node.children.push(self._get_range_tree(field, child_node, remaining_range - 1));
             }
         }
 
@@ -738,7 +695,26 @@ impl FieldCharacter {
     }
 
     pub fn get_range_tree(&self, field: &FieldGripMap, range: u32) -> VecTree<Vector3i> {
-        self._get_range_tree(field, VecTree::new(self.field_position, vec![]), range)
+
+        self._get_range_tree(&field, VecTree::new(self.field_position, vec![]), range)
+    }
+
+    // Make this find and return position in tree
+    fn _is_in_tree(&self, tree: &VecTree<Vector3i>, tree_coords: Vec<u32>, pos: Vector3i) -> Vec<u32> {
+        if tree.value == pos {
+            return tree_coords;
+        }
+
+        for i in 0..tree.children.len() {
+            let mut tree_coords: Vec<u32> = tree_coords.clone();
+            tree_coords.push(i as u32);
+
+            let child_coords: Vec<u32> = self._is_in_tree(tree, tree_coords, pos);
+
+            if !child_coords.is_empty() { return child_coords; }
+        }
+
+        return vec![];
     }
 }
 

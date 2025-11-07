@@ -1,0 +1,44 @@
+[gd_scene load_steps=6 format=3 uid="uid://bws6q64vnvmup"]
+
+[ext_resource type="Theme" uid="uid://dbkbnxud32mtp" path="res://fonts/CascadiaCodeNF.theme" id="1_7korw"]
+[ext_resource type="Shader" path="res://shaders/dithering ordered special.gdshader" id="1_ggci0"]
+[ext_resource type="Texture2D" uid="uid://c754glgcjnqy1" path="res://imgs/palette.png" id="2_eewdi"]
+[ext_resource type="CompressedTexture2DArray" uid="uid://cxsw7c64eedqn" path="res://imgs/dithering_overlays/void and cluster atlas 32x32x10.png" id="3_cjxsp"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_6rdm5"]
+resource_local_to_scene = true
+shader = ExtResource("1_ggci0")
+shader_parameter/pattern_index = null
+shader_parameter/pattern_texture = ExtResource("3_cjxsp")
+shader_parameter/palette_texture = ExtResource("2_eewdi")
+
+[node name="Node2D" type="InputPassNode" node_paths=PackedStringArray("child_viewport")]
+child_viewport = NodePath("")
+child_different_size = true
+integer_scale = -2
+
+[node name="Environment" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+theme = ExtResource("1_7korw")
+
+[node name="TitleLabel" type="RichTextLabel" parent="Environment"]
+layout_mode = 0
+offset_left = 40.0
+offset_top = 40.0
+offset_right = 1240.0
+offset_bottom = 160.0
+text = "holy balls"
+
+[node name="DitheringLayer" type="CanvasLayer" parent="."]
+
+[node name="ColorRect" type="DitherShaderRect" parent="DitheringLayer"]
+pattern_length = 10
+material = SubResource("ShaderMaterial_6rdm5")
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+metadata/_edit_use_anchors_ = true

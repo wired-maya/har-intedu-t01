@@ -1,7 +1,7 @@
 [package]
 name = "game" # Simple name because package isn't being published anywhere
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib"]  # Compile this crate to a dynamic C library.

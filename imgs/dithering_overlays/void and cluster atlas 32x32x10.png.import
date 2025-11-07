@@ -1,0 +1,26 @@
+[remap]
+
+importer="2d_array_texture"
+type="CompressedTexture2DArray"
+uid="uid://cxsw7c64eedqn"
+path="res://.godot/imported/void and cluster atlas 32x32x10.png-010f85605fc52515d26b6a9b3a87b89e.ctexarray"
+metadata={
+"vram_texture": false
+}
+
+[deps]
+
+source_file="res://imgs/dithering_overlays/void and cluster atlas 32x32x10.png"
+dest_files=["res://.godot/imported/void and cluster atlas 32x32x10.png-010f85605fc52515d26b6a9b3a87b89e.ctexarray"]
+
+[params]
+
+compress/mode=0
+compress/high_quality=false
+compress/lossy_quality=0.7
+compress/hdr_compression=1
+compress/channel_pack=0
+mipmaps/generate=false
+mipmaps/limit=-1
+slices/horizontal=10
+slices/vertical=1
